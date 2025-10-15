@@ -1,12 +1,14 @@
 import os
 import logging
-import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from openai import OpenAI
+import telegram
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+import openai
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # Получение токенов
@@ -19,36 +21,57 @@ if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
 
 logger.info("✅ Токены загружены")
 
-# Инициализация
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Настройка OpenAI
+openai.api_key = OPENAI_API_KEY
 
-@dp.message(Command("start"))
-async def start_handler(message: types.Message):
-    await message.answer("Привет! Я бот ORONA с ChatGPT. Задай вопрос!")
+def start_command(update, context):
+    update.message.reply_text('Привет! Я бот ORONA с ChatGPT. Задай вопрос!')
 
-@dp.message(Command("help"))
-async def help_handler(message: types.Message):
-    await message.answer("Просто напиши сообщение - я отвечу через GPT!")
+def help_command(update, context):
+    update.message.reply_text('Просто напиши сообщение - я отвечу через GPT!')
 
-@dp.message()
-async def message_handler(message: types.Message):
+def handle_message(update, context):
     try:
-        response = client.chat.completions.create(
+        user_message = update.message.text
+        logger.info(f"📨 Получено: {user_message}")
+        
+        # Запрос к OpenAI
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": message.text}],
+            messages=[{"role": "user", "content": user_message}],
             max_tokens=500
         )
+        
         answer = response.choices[0].message.content
-        await message.answer(answer)
+        update.message.reply_text(answer)
+        
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        await message.answer("Ошибка обработки запроса")
+        logger.error(f"❌ Ошибка: {e}")
+        update.message.reply_text("Ошибка обработки запроса")
 
-async def main():
-    logger.info("🚀 Бот запускается...")
-    await dp.start_polling(bot)
+def error_handler(update, context):
+    logger.error(f"Ошибка: {context.error}")
+
+def main():
+    try:
+        # Создаем updater
+        updater = Updater(TELEGRAM_TOKEN, use_context=True)
+        dp = updater.dispatcher
+        
+        # Добавляем обработчики
+        dp.add_handler(CommandHandler("start", start_command))
+        dp.add_handler(CommandHandler("help", help_command))
+        dp.add_handler(MessageHandler(Filters.text, handle_message))
+        dp.add_error_handler(error_handler)
+        
+        # Запускаем бота
+        logger.info("🚀 Бот запускается...")
+        updater.start_polling()
+        updater.idle()
+        
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        exit(1)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
