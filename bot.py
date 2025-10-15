@@ -1,56 +1,47 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from openai import OpenAI
+import telebot
+import openai
 
-# Настройка логов
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получаем токены из окружения
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Токены
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
-    raise ValueError("❌ Не найдены переменные TELEGRAM_TOKEN или OPENAI_API_KEY!")
+if not TELEGRAM_TOKEN:
+    logger.error("❌ TELEGRAM_TOKEN не установлен!")
+    exit(1)
+if not OPENAI_API_KEY:
+    logger.error("❌ OPENAI_API_KEY не установлен!")
+    exit(1)
 
 logger.info("✅ Токены загружены")
 
 # Инициализация
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher(bot)
-client = OpenAI(api_key=OPENAI_API_KEY)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+openai.api_key = OPENAI_API_KEY
 
-# Команда /start
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
-    await message.answer("Привет 👋\nЯ бот ChatGPT! Напиши мне любой вопрос — и я помогу!")
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, 'Привет! Я бот ORONA с ChatGPT. Задай вопрос!')
 
-# Обработка текстов
-@dp.message_handler(content_types=['text'])
-async def handle_message(message: types.Message):
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
     try:
-        user_message = message.text
-        await message.answer("🤔 Думаю...")
-
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",  # компактная и быстрая модель
-            messages=[
-                {"role": "system", "content": "Ты — доброжелательный и умный помощник."},
-                {"role": "user", "content": user_message}
-            ],
-            temperature=0.7,
-            max_tokens=500,
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": message.text}],
+            max_tokens=300
         )
-
-        answer = completion.choices[0].message.content.strip()
-        await message.answer(answer)
-
+        answer = response.choices[0].message.content
+        bot.reply_to(message, answer)
     except Exception as e:
-        logger.exception(e)
-        await message.answer("⚠️ Произошла ошибка. Попробуй чуть позже.")
+        logger.error(f"Ошибка: {e}")
+        bot.reply_to(message, "Извините, ошибка обработки")
 
-# Запуск
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    logger.info("🚀 Бот запускается...")
+    bot.infinity_polling()
