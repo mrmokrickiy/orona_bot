@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
@@ -61,7 +60,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"❌ Ошибка: {context.error}")
 
-def main():
+async def main():
     try:
         # Создаем приложение
         application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -76,11 +75,12 @@ def main():
         
         # Запускаем бота
         logging.info("🚀 Бот запускается...")
-        application.run_polling()
+        await application.run_polling()
         
     except Exception as e:
         logging.error(f"❌ Критическая ошибка при запуске: {e}")
         exit(1)
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())
