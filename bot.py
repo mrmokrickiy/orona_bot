@@ -1,7 +1,8 @@
 import os
 import logging
+import asyncio
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
 # Настройка логирования
@@ -27,13 +28,13 @@ logging.info("✅ Токены загружены успешно")
 # Инициализация OpenAI клиента
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-def start_command(update: Update, context: CallbackContext):
-    update.message.reply_text('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
 
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
 
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     logging.info(f"📨 Получено сообщение: {user_message}")
     
@@ -55,29 +56,27 @@ def handle_message(update: Update, context: CallbackContext):
         logging.error(f"❌ Ошибка OpenAI API: {e}")
         bot_response = "Извините, произошла ошибка при обработке вашего запроса."
     
-    update.message.reply_text(bot_response)
+    await update.message.reply_text(bot_response)
 
-def error_handler(update: Update, context: CallbackContext):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"❌ Ошибка: {context.error}")
 
 def main():
     try:
-        # Создаем Updater и Dispatcher
-        updater = Updater(TELEGRAM_TOKEN, use_context=True)
-        dp = updater.dispatcher
+        # Создаем приложение
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Добавляем обработчики
-        dp.add_handler(CommandHandler("start", start_command))
-        dp.add_handler(CommandHandler("help", help_command))
-        dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
         # Обработчик ошибок
-        dp.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
         
         # Запускаем бота
         logging.info("🚀 Бот запускается...")
-        updater.start_polling()
-        updater.idle()
+        application.run_polling()
         
     except Exception as e:
         logging.error(f"❌ Критическая ошибка при запуске: {e}")
