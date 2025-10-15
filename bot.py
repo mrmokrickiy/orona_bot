@@ -1,15 +1,19 @@
 import os
 import logging
+from aiogram import Bot, Dispatcher, types, Router
+from aiogram.filters import Command
+from aiogram.types import Message
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 import asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 # Получение токенов из переменных окружения
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -17,26 +21,35 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Проверка наличия токенов
 if not TELEGRAM_TOKEN:
-    logging.error("❌ TELEGRAM_TOKEN не установлен!")
+    logger.error("❌ TELEGRAM_TOKEN не установлен!")
     exit(1)
 if not OPENAI_API_KEY:
-    logging.error("❌ OPENAI_API_KEY не установлен!")
+    logger.error("❌ OPENAI_API_KEY не установлен!")
     exit(1)
 
-logging.info("✅ Токены загружены успешно")
+logger.info("✅ Токены загружены успешно")
+
+# Инициализация бота и диспетчера
+bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
+router = Router()
+dp.include_router(router)
 
 # Инициализация OpenAI клиента
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
+@router.message(Command("start"))
+async def start_command(message: Message):
+    await message.answer('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
+@router.message(Command("help"))
+async def help_command(message: Message):
+    await message.answer('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    logging.info(f"📨 Получено сообщение: {user_message}")
+@router.message()
+async def handle_message(message: Message):
+    user_message = message.text
+    logger.info(f"📨 Получено сообщение: {user_message}")
     
     try:
         # Отправляем запрос к OpenAI API
@@ -50,37 +63,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         bot_response = response.choices[0].message.content
-        logging.info(f"🤖 Ответ от GPT: {bot_response}")
+        logger.info(f"🤖 Ответ от GPT: {bot_response}")
         
     except Exception as e:
-        logging.error(f"❌ Ошибка OpenAI API: {e}")
+        logger.error(f"❌ Ошибка OpenAI API: {e}")
         bot_response = "Извините, произошла ошибка при обработке вашего запроса."
     
-    await update.message.reply_text(bot_response)
+    await message.answer(bot_response)
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"❌ Ошибка: {context.error}")
-
-def main():
-    try:
-        # Создаем приложение
-        application = Application.builder().token(TELEGRAM_TOKEN).build()
-        
-        # Добавляем обработчики
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        # Обработчик ошибок
-        application.add_error_handler(error_handler)
-        
-        # Запускаем бота
-        logging.info("🚀 Бот запускается...")
-        application.run_polling()
-        
-    except Exception as e:
-        logging.error(f"❌ Критическая ошибка при запуске: {e}")
-        exit(1)
+async def main():
+    logger.info("🚀 Бот запускается...")
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
