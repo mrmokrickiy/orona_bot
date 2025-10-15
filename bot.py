@@ -3,17 +3,9 @@ import logging
 import telebot
 import openai
 import requests
-import json
 import random
-import sqlite3
 from io import BytesIO
-import speech_recognition as sr
-from pydub import AudioSegment
 import base64
-from datetime import datetime, timedelta
-import schedule
-import time
-import threading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,28 +16,6 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
-# ========== БАЗА ДАННЫХ ==========
-def init_db():
-    conn = sqlite3.connect('bot_data.db')
-    c = conn.cursor()
-    
-    # Таблица напоминаний
-    c.execute('''CREATE TABLE IF NOT EXISTS reminders
-                 (user_id INTEGER, reminder_text TEXT, reminder_time TEXT)''')
-    
-    # Таблица сохраненного контента
-    c.execute('''CREATE TABLE IF NOT EXISTS saved_content
-                 (user_id INTEGER, content_type TEXT, content_text TEXT)''')
-    
-    # Таблица списка покупок
-    c.execute('''CREATE TABLE IF NOT EXISTS shopping_list
-                 (user_id INTEGER, item TEXT, completed INTEGER)''')
-    
-    conn.commit()
-    conn.close()
-
-init_db()
-
 # ========== 🎨 СОЗДАНИЕ ИЗОБРАЖЕНИЙ ==========
 @bot.message_handler(commands=['image', 'img', 'картинка'])
 def generate_image(message):
@@ -53,7 +23,7 @@ def generate_image(message):
         prompt = message.text.split(' ', 1)[1] if ' ' in message.text else ''
         
         if not prompt:
-            bot.reply_to(message, '🎨 Напиши описание картинки после команды:\n/image космический корабль\n/image милый котенок в корзинке')
+            bot.reply_to(message, '🎨 Напиши описание картинки после команды:\n/image космический корабль\n/image милый котенок')
             return
         
         bot.reply_to(message, f'🎨 Создаю: "{prompt}"...')
@@ -102,39 +72,7 @@ def handle_photo(message):
 # ========== 🎤 ГОЛОСОВЫЕ СООБЩЕНИЯ ==========
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
-    try:
-        bot.reply_to(message, "🎤 Слушаю...")
-        
-        file_info = bot.get_file(message.voice.file_id)
-        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
-        
-        response = requests.get(file_url)
-        voice_data = BytesIO(response.content)
-        
-        audio = AudioSegment.from_ogg(voice_data)
-        wav_data = BytesIO()
-        audio.export(wav_data, format="wav")
-        wav_data.seek(0)
-        
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_data) as source:
-            audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data, language='ru-RU')
-        
-        bot.reply_to(message, f"🎤 Распознал: \"{text}\"")
-        
-        # Обрабатываем через GPT
-        gpt_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": text}],
-            max_tokens=500
-        )
-        
-        answer = gpt_response.choices[0].message.content
-        bot.reply_to(message, f"🤖 Ответ: {answer}")
-        
-    except Exception as e:
-        bot.reply_to(message, "❌ Не распознал голосовое")
+    bot.reply_to(message, "🎤 Вижу голосовое сообщение! Напиши текст, и я с радостью отвечу! 💬")
 
 # ========== 🎲 ИГРЫ ==========
 games = {}
@@ -147,7 +85,6 @@ def start_game(message):
 /quiz - 🧠 Викторина (5 случайных вопросов)
 /riddle - 🔍 Загадка (угадай загадку)
 /guess - 🔢 Угадай число (от 1 до 100)
-/wordgame - 📝 Игра в слова (составь слово)
 
 Выбери игру! 🎯
     """
@@ -192,43 +129,19 @@ def guess_number(message):
 @bot.message_handler(commands=['currency', 'курс'])
 def convert_currency(message):
     try:
-        # Простой конвертер (можно подключить реальный API)
         text = message.text.lower()
         
         if 'доллар' in text or 'usd' in text:
-            rate = 95.0  # Примерный курс
+            rate = 95.0
             bot.reply_to(message, f"💵 Курс доллара: ~{rate} руб.")
         elif 'евро' in text or 'eur' in text:
-            rate = 102.0  # Примерный курс
+            rate = 102.0
             bot.reply_to(message, f"💶 Курс евро: ~{rate} руб.")
         else:
             bot.reply_to(message, "💱 Конвертер валют:\n\n/currency доллар - курс USD\n/currency евро - курс EUR")
             
     except Exception as e:
         bot.reply_to(message, "❌ Ошибка конвертации")
-
-# ========== 📅 НАПОМИНАНИЯ ==========
-@bot.message_handler(commands=['remind', 'напомни'])
-def set_reminder(message):
-    try:
-        text = message.text.replace('/remind', '').replace('/напомни', '').strip()
-        
-        if not text:
-            bot.reply_to(message, "⏰ Напоминания:\n\n/remind через 2 часа позвонить маме\n/remind завтра в 10:00 совещание")
-            return
-        
-        # Сохраняем в базу (упрощенная версия)
-        conn = sqlite3.connect('bot_data.db')
-        c = conn.cursor()
-        reminder_time = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("INSERT INTO reminders VALUES (?, ?, ?)", (message.chat.id, text, reminder_time))
-        conn.commit()
-        conn.close()
-        
-        bot.reply_to(message, f"✅ Напоминание установлено:\n\"{text}\"")
-        
-    except Exception as e:
-        bot.reply_to(message, "❌ Ошибка установки напоминания")
 
 # ========== 😂 ГЕНЕРАТОР ШУТОК ==========
 @bot.message_handler(commands=['joke', 'шутка'])
@@ -247,7 +160,6 @@ def tell_joke(message):
         bot.reply_to(message, f"😂 Шутка:\n\n{joke}")
         
     except Exception as e:
-        # Запасные шутки
         jokes = [
             "Почему программисты путают Хэллоуин и Рождество? Потому что Oct 31 == Dec 25!",
             "Как называется баран, который знает только одну ноту? Бара-бара-бан!",
@@ -280,36 +192,6 @@ def generate_code(message):
     except Exception as e:
         bot.reply_to(message, "❌ Ошибка генерации кода")
 
-# ========== 🛒 СПИСОК ПОКУПОК ==========
-@bot.message_handler(commands=['shop', 'покупки'])
-def shopping_list(message):
-    try:
-        text = message.text.replace('/shop', '').replace('/покупки', '').strip()
-        
-        conn = sqlite3.connect('bot_data.db')
-        c = conn.cursor()
-        
-        if text:
-            # Добавляем товар
-            c.execute("INSERT INTO shopping_list VALUES (?, ?, ?)", (message.chat.id, text, 0))
-            conn.commit()
-            bot.reply_to(message, f"✅ Добавлено в список: {text}")
-        else:
-            # Показываем список
-            c.execute("SELECT item FROM shopping_list WHERE user_id = ? AND completed = 0", (message.chat.id,))
-            items = c.fetchall()
-            
-            if items:
-                item_list = "\n".join([f"• {item[0]}" for item in items])
-                bot.reply_to(message, f"🛒 Список покупок:\n\n{item_list}\n\nЧтобы добавить: /shop молоко")
-            else:
-                bot.reply_to(message, "🛒 Список покупок пуст\n\nДобавь товары: /shop молоко")
-        
-        conn.close()
-        
-    except Exception as e:
-        bot.reply_to(message, "❌ Ошибка работы со списком")
-
 # ========== ✍️ КРЕАТИВНОЕ ПИСЬМО ==========
 @bot.message_handler(commands=['write', 'напиши'])
 def creative_writing(message):
@@ -317,7 +199,7 @@ def creative_writing(message):
         request = message.text.replace('/write', '').replace('/напиши', '').strip()
         
         if not request:
-            bot.reply_to(message, "✍️ Креативное письмо:\n\n/write короткий рассказ про космос\n/write стих про любовь\n/write сценарий для комедийного скетча")
+            bot.reply_to(message, "✍️ Креативное письмо:\n\n/write короткий рассказ про космос\n/write стих про любовь")
             return
         
         response = openai.ChatCompletion.create(
@@ -334,37 +216,6 @@ def creative_writing(message):
         
     except Exception as e:
         bot.reply_to(message, "❌ Ошибка создания текста")
-
-# ========== 🎭 РОЛЕВЫЕ ИГРЫ ==========
-@bot.message_handler(commands=['roleplay', 'роль'])
-def start_roleplay(message):
-    roles = """
-🎭 *Выбери роль:*
-
-/role ai - Я буду ИИ из будущего
-/role pirate - Я буду пиратом
-/role wizard - Я буду волшебником
-/role detective - Я буду детективом
-
-Напиши /stop чтобы выйти из роли.
-    """
-    bot.reply_to(message, roles, parse_mode='Markdown')
-
-@bot.message_handler(commands=['role'])
-def set_role(message):
-    role = message.text.split(' ')[1] if ' ' in message.text else ''
-    role_prompts = {
-        'ai': "Ты - продвинутый ИИ из 2050 года. Говори как умная машина, используй техно-термины.",
-        'pirate': "Ты - веселый пират с корабля 'Черная Жемчужина'. Говори как пират: 'Йо-хо-хо!'",
-        'wizard': "Ты - мудрый волшебник из древнего ордена. Говори загадочно и мудро.",
-        'detective': "Ты - опытный детектив в подержанном плаще. Говори подозрительно и аналитически."
-    }
-    
-    if role in role_prompts:
-        games[message.chat.id] = {"type": "roleplay", "role": role_prompts[role]}
-        bot.reply_to(message, f"🎭 Отлично! Теперь я {role}! Общайся со мной в этой роли!")
-    else:
-        bot.reply_to(message, "❌ Неизвестная роль. Используй /roleplay для выбора.")
 
 # ========== 🔮 ПРЕДСКАЗАНИЯ ==========
 @bot.message_handler(commands=['predict', 'предскажи'])
@@ -397,7 +248,7 @@ def give_advice(message):
         request = message.text.replace('/advice', '').replace('/совет', '').strip()
         
         if not request:
-            bot.reply_to(message, "🧠 Коуч-помощник:\n\n/advice как стать дисциплинированным\n/advice как справиться со стрессом\n/advice как найти мотивацию")
+            bot.reply_to(message, "🧠 Коуч-помощник:\n\n/advice как стать дисциплинированным\n/advice как справиться со стрессом")
             return
         
         response = openai.ChatCompletion.create(
@@ -460,23 +311,6 @@ def handle_game_response(message):
             except:
                 bot.reply_to(message, "Введи число!")
                 
-        elif game["type"] == "roleplay":
-            if user_answer == '/stop':
-                del games[message.chat.id]
-                bot.reply_to(message, "🎭 Ролевая игра завершена!")
-            else:
-                # Обрабатываем в контексте роли
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": game["role"]},
-                        {"role": "user", "content": user_answer}
-                    ],
-                    max_tokens=300
-                )
-                answer = response.choices[0].message.content
-                bot.reply_to(message, answer)
-                
     except Exception as e:
         bot.reply_to(message, "❌ Ошибка в игре")
 
@@ -497,18 +331,15 @@ def start(message):
 /quiz - Викторина
 /riddle - Загадки
 /guess - Угадай число
-/roleplay - Ролевые игры
 
 *🛠️ Практичное:*
 /currency - Курсы валют
-/remind - Напоминания
-/shop - Список покупок
 /code - Генератор кода
 /advice - Советы коуча
 
 *📱 Мультимедиа:*
 Отправь фото - Анализ изображения
-Отправь голосовое - Распознавание и ответ
+Отправь голосовое - (поддержка скоро появится!)
 
 *Просто напиши что-нибудь - и я отвечу!* ✨
     """
@@ -517,19 +348,13 @@ def start(message):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
-        # Проверяем ролевую игру
-        if message.chat.id in games and games[message.chat.id]["type"] == "roleplay":
-            return  # Обрабатывается в handle_game_response
-        
-        # Обычный ответ с улучшенным промптом
+        # Обычный ответ
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {
                     "role": "system",
-                    "content": """Ты - универсальный помощник с чувством юмора. 
-Отвечай полезно, но не скучно. Можешь добавлять шутки и интересные факты. 
-Будь хорошим собеседником!"""
+                    "content": "Ты - универсальный помощник с чувством юмора. Отвечай полезно, но не скучно."
                 },
                 {
                     "role": "user", 
