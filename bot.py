@@ -4,53 +4,62 @@ import telebot
 import openai
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-logger.info("=== БОТ НАЧИНАЕТ ЗАПУСК ===")
-
-# Получаем токены
+# Получение токенов из переменных окружения
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-logger.info(f"TELEGRAM_TOKEN: {'***' if TELEGRAM_TOKEN else 'MISSING'}")
-logger.info(f"OPENAI_API_KEY: {'***' if OPENAI_API_KEY else 'MISSING'}")
+# Инициализация OpenAI клиента
+client = openai
+client.api_key = OPENAI_API_KEY
 
-if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
-    logger.error("❌ ТОКЕНЫ НЕ НАЙДЕНЫ!")
-    exit(1)
+async def start_command(update, context):
+    await update.message.reply_text('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-openai.api_key = OPENAI_API_KEY
+async def help_command(update, context):
+    await update.message.reply_text('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
 
-logger.info("✅ Токены загружены")
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    logger.info(f"Получена команда /start от {message.from_user.username}")
-    bot.reply_to(message, "🤖 Привет! Я умный помощник. Задай любой вопрос!")
-
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
+async def handle_message(update, context):
+    user_message = update.message.text
+    
     try:
-        logger.info(f"Обрабатываю сообщение: {message.text}")
-        
-        response = openai.ChatCompletion.create(
+        # Отправляем запрос к OpenAI API
+        response = client.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты полезный AI-помощник. Отвечай подробно и по делу."},
-                {"role": "user", "content": message.text}
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": user_message}
             ],
             max_tokens=500
         )
         
-        answer = response.choices[0].message.content
-        logger.info("✅ Ответ сгенерирован")
-        bot.reply_to(message, answer)
+        bot_response = response.choices[0].message.content
         
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
-        bot.reply_to(message, "❌ Ошибка обработки")
+        logging.error(f"Error with OpenAI API: {e}")
+        bot_response = "Извините, произошла ошибка при обработке вашего запроса."
+    
+    await update.message.reply_text(bot_response)
 
-logger.info("🚀 Запускаю бота...")
-bot.infinity_polling()
+async def error_handler(update, context):
+    logging.error(f"Update {update} caused error {context.error}")
+
+def main():
+    # Создаем приложение
+    application = telebot.TeleBot(TELEGRAM_TOKEN)
+    
+    # Добавляем обработчики
+    application.message_handler(commands=['start'])(start_command)
+    application.message_handler(commands=['help'])(help_command)
+    application.message_handler(func=lambda message: True)(handle_message)
+    
+    # Запускаем бота
+    application.polling()
+
+if __name__ == '__main__':
+    main()
