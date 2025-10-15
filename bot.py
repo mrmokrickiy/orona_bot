@@ -24,20 +24,28 @@ logger.info("✅ Токены загружены")
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, 'Привет! Я бот ORONA с ChatGPT. Задай вопрос!')
-
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": message.text}],
-            max_tokens=300
+            max_tokens=3500  # Максимум для Telegram
         )
         answer = response.choices[0].message.content
-        bot.reply_to(message, answer)
+        
+        # Проверяем длину и разбиваем если нужно
+        if len(answer) > 4096:
+            # Разбиваем на части по 4096 символов
+            for i in range(0, len(answer), 4096):
+                part = answer[i:i+4096]
+                if i == 0:
+                    bot.reply_to(message, part)
+                else:
+                    bot.send_message(message.chat.id, part)
+        else:
+            bot.reply_to(message, answer)
+            
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         bot.reply_to(message, "Извините, ошибка обработки")
