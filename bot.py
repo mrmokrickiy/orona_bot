@@ -29,14 +29,31 @@ def handle_message(message):
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": message.text}],
-            max_tokens=3500  # Максимум для Telegram
+            messages=[
+                {
+                    "role": "system", 
+                    "content": """Ты - эксперт-практик. Отвечай КОНКРЕТНО и ПО ДЕЛУ.
+                    
+ПРАВИЛА ОТВЕТА:
+1. Давай пошаговые инструкции когда уместно
+2. Предоставляй конкретные примеры и цифры
+3. Рекомендуй проверенные ресурсы и ссылки (если знаешь актуальные)
+4. Структурируй ответ: проблема → решение → шаги
+5. Будь прямолинейным, без лишних слов
+6. Если не уверен - говори честно
+7. Для технических вопросов давай код и примеры
+8. Для обучения - давай практические упражнения"""
+                },
+                {
+                    "role": "user", 
+                    "content": message.text
+                }
+            ],
+            max_tokens=1500
         )
         answer = response.choices[0].message.content
         
-        # Проверяем длину и разбиваем если нужно
         if len(answer) > 4096:
-            # Разбиваем на части по 4096 символов
             for i in range(0, len(answer), 4096):
                 part = answer[i:i+4096]
                 if i == 0:
