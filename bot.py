@@ -3,63 +3,110 @@ import logging
 import telebot
 import openai
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получение токенов из переменных окружения
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Инициализация OpenAI клиента
-client = openai
-client.api_key = OPENAI_API_KEY
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+openai.api_key = OPENAI_API_KEY
 
-async def start_command(update, context):
-    await update.message.reply_text('Привет! Я бот ORONA с интеграцией ChatGPT. Задайте мне вопрос!')
+# Простое хранилище контекста в памяти
+user_conversations = {}
 
-async def help_command(update, context):
-    await update.message.reply_text('Просто напишите сообщение, и я отвечу с помощью ChatGPT!')
-
-async def handle_message(update, context):
-    user_message = update.message.text
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = message.from_user.id
+    # Начинаем новый диалог
+    user_conversations[user_id] = [
+        {"role": "system", "content": "Ты - умный помощник. Поддерживай контекст разговора."}
+    ]
     
+    welcome = """
+🤖 *Привет! Я умный помощник с памятью* 
+
+Теперь я помню наш разговор! 
+
+*Команды:*
+/clear - очистить историю
+/help - справка
+
+Просто общайся со мной - я запомню контекст! 🧠
+    """
+    bot.reply_to(message, welcome, parse_mode='Markdown')
+
+@bot.message_handler(commands=['clear'])
+def clear_context(message):
+    user_id = message.from_user.id
+    if user_id in user_conversations:
+        user_conversations[user_id] = [
+            {"role": "system", "content": "Ты - умный помощник. Поддерживай контекст разговора."}
+        ]
+    bot.reply_to(message, "🧹 История очищена! Начинаем заново.")
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    help_text = """
+🆘 *Помощь*
+
+*Команды:*
+/start - начать новый диалог
+/clear - очистить историю
+/help - справка
+
+*Память:*
+• Запоминаю последние 6 сообщений
+• Поддерживаю контекст разговора
+• Отвечаю с учетом предыдущих сообщений
+
+Просто пиши - я помню наш разговор! 💬
+    """
+    bot.reply_to(message, help_text, parse_mode='Markdown')
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
     try:
-        # Отправляем запрос к OpenAI API
-        response = client.ChatCompletion.create(
+        user_id = message.from_user.id
+        user_message = message.text
+        
+        # Создаем контекст если его нет
+        if user_id not in user_conversations:
+            user_conversations[user_id] = [
+                {"role": "system", "content": "Ты - умный помощник. Поддерживай контекст разговора."}
+            ]
+        
+        # Добавляем сообщение пользователя
+        user_conversations[user_id].append({"role": "user", "content": user_message})
+        
+        # Ограничиваем историю (6 последних сообщений + системное)
+        if len(user_conversations[user_id]) > 7:
+            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-6:]
+        
+        # Отправляем в OpenAI
+        bot.send_chat_action(message.chat.id, 'typing')
+        
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=500
+            messages=user_conversations[user_id],
+            max_tokens=600
         )
         
         bot_response = response.choices[0].message.content
         
+        # Добавляем ответ бота в историю
+        user_conversations[user_id].append({"role": "assistant", "content": bot_response})
+        
+        # Снова ограничиваем историю
+        if len(user_conversations[user_id]) > 7:
+            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-6:]
+        
+        bot.reply_to(message, bot_response)
+        
     except Exception as e:
-        logging.error(f"Error with OpenAI API: {e}")
-        bot_response = "Извините, произошла ошибка при обработке вашего запроса."
-    
-    await update.message.reply_text(bot_response)
-
-async def error_handler(update, context):
-    logging.error(f"Update {update} caused error {context.error}")
-
-def main():
-    # Создаем приложение
-    application = telebot.TeleBot(TELEGRAM_TOKEN)
-    
-    # Добавляем обработчики
-    application.message_handler(commands=['start'])(start_command)
-    application.message_handler(commands=['help'])(help_command)
-    application.message_handler(func=lambda message: True)(handle_message)
-    
-    # Запускаем бота
-    application.polling()
+        logger.error(f"❌ Ошибка: {e}")
+        bot.reply_to(message, "❌ Ошибка. Попробуй еще раз!")
 
 if __name__ == '__main__':
-    main()
+    logger.info("🚀 Запускаю бота с памятью...")
+    bot.infinity_polling()
