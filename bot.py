@@ -1,12 +1,10 @@
 import os
 import logging
 import telebot
-import openai
+from openai import OpenAI
 import requests
 import base64
-import io
 from io import BytesIO
-import tempfile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,36 +13,16 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)  # Новый клиент
 
 # Хранилище контекста
 user_conversations = {}
 
-# Умный системный промпт
-SMART_SYSTEM_PROMPT = """Ты - продвинутый AI-ассистент с мультимедийными возможностями. Твои способности:
-
-🎯 **ИНТЕЛЛЕКТ:**
-- Используй GPT-4 для сложных задач
-- Анализируй контекст глубоко
-- Предлагай креативные решения
-- Думай как эксперт в разных областях
-
-📱 **МУЛЬТИМЕДИА:**
-- Создавай изображения по описанию
-- Анализируй загруженные фото
-- Работай с голосовыми сообщениями
-- Понимай разные форматы контента
-
-💡 **ПОВЕДЕНИЕ:**
-- Будь проактивным и полезным
-- Задавай уточняющие вопросы
-- Предлагай дополнительные возможности
-- Будь настоящим интеллектуальным партнером"""
+SMART_SYSTEM_PROMPT = """Ты - умный и полезный AI-помощник. Отвечай подробно и по делу."""
 
 def transcribe_audio(audio_file):
     """Транскрибация голосового сообщения"""
     try:
-        # Скачиваем аудио файл
         file_info = bot.get_file(audio_file.file_id)
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
         
@@ -53,21 +31,21 @@ def transcribe_audio(audio_file):
         audio_data = BytesIO(response.content)
         
         # Сохраняем во временный файл
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_audio:
-            temp_audio.write(audio_data.getvalue())
-            temp_audio_path = temp_audio.name
+        with open('temp_audio.ogg', 'wb') as f:
+            f.write(audio_data.getvalue())
         
-        # Открываем файл и отправляем в Whisper
-        with open(temp_audio_path, 'rb') as audio_file:
-            transcript = openai.Audio.transcribe(
-                model="whisper-1",
+        # Транскрибация через Whisper
+        with open('temp_audio.ogg', 'rb') as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1", 
                 file=audio_file,
-                language="ru"  # Указываем язык для лучшего распознавания
+                language="ru"
             )
         
         # Удаляем временный файл
-        os.unlink(temp_audio_path)
-        
+        if os.path.exists('temp_audio.ogg'):
+            os.remove('temp_audio.ogg')
+            
         return transcript.text
     except Exception as e:
         logger.error(f"❌ Ошибка транскрибации: {e}")
@@ -76,22 +54,20 @@ def transcribe_audio(audio_file):
 def analyze_image(image_file):
     """Анализ изображения через GPT-4 Vision"""
     try:
-        # Скачиваем изображение
         file_info = bot.get_file(image_file.file_id)
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
         
         response = requests.get(file_url)
         base64_image = base64.b64encode(response.content).decode('utf-8')
         
-        # Анализируем через GPT-4 Vision
-        analysis_response = openai.ChatCompletion.create(
+        analysis_response = client.chat.completions.create(
             model="gpt-4-vision-preview",
             messages=[{
                 "role": "user",
                 "content": [
                     {
                         "type": "text", 
-                        "text": "Детально опиши что изображено на фото. Будь максимально внимательным к деталям, цветам, эмоциям, объектам. Если есть текст - расшифруй его."
+                        "text": "Опиши что изображено на фото"
                     },
                     {
                         "type": "image_url",
@@ -101,7 +77,7 @@ def analyze_image(image_file):
                     }
                 ]
             }],
-            max_tokens=1000
+            max_tokens=500
         )
         
         return analysis_response.choices[0].message.content
@@ -112,7 +88,7 @@ def analyze_image(image_file):
 def generate_image_dalle(prompt):
     """Генерация изображения через DALL-E 3"""
     try:
-        response = openai.Image.create(
+        response = client.images.generate(
             model="dall-e-3",
             prompt=prompt,
             size="1024x1024",
@@ -125,23 +101,19 @@ def generate_image_dalle(prompt):
         return None
 
 def get_smart_response(messages, use_gpt4=False):
-    """Получение умного ответа от GPT"""
+    """Получение умного ответа"""
     try:
         model = "gpt-4" if use_gpt4 else "gpt-3.5-turbo"
         
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=1500,
-            temperature=0.7
+            max_tokens=1000
         )
         
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"❌ Ошибка GPT: {e}")
-        # Пробуем с GPT-3.5 если GPT-4 недоступен
-        if use_gpt4:
-            return get_smart_response(messages, use_gpt4=False)
         return "❌ Ошибка обработки запроса"
 
 @bot.message_handler(commands=['start'])
@@ -152,94 +124,39 @@ def start(message):
     ]
     
     welcome = """
-🤖 *ПРИВЕТ! Я УМНЫЙ МУЛЬТИМЕДИЙНЫЙ ПОМОЩНИК* 
+🤖 *ПРИВЕТ! Я УМНЫЙ ПОМОЩНИК* 
 
-*Мои суперспособности:*
+*Мои возможности:*
 
-🧠 **ИНТЕЛЛЕКТ:**
-• GPT-4 для сложных задач
-• Глубокий анализ и креативность
-• Контекстное понимание
+🎨 **Создание изображений:**
+/image [описание] - создам картинку
 
-🎨 **СОЗДАНИЕ:**
-• Генерация уникальных изображений
-• Креативное письмо и идеи
-• Дизайн и арт
+📱 **Мультимедиа:**
+• Отправь фото - проанализирую
+• Отправь голосовое - расшифрую и отвечу
 
-📱 **МУЛЬТИМЕДИА:**
-• Анализ фотографий
-• Распознавание голосовых сообщений
-• Работа с разными форматами
+🧠 **Умные ответы:**
+• Поддерживаю контекст разговора
+• Отвечаю на сложные вопросы
 
-*Команды:*
-/image [описание] - создать изображение
-/gpt4 [запрос] - использовать GPT-4
-/clear - очистить историю
-/help - все возможности
-
-*Просто отправь:*
-• Текст - умный ответ
-• Фото - детальный анализ
-• Голосовое - расшифровка и ответ
+*Просто используй меня!* 🚀
     """
     bot.reply_to(message, welcome, parse_mode='Markdown')
 
-@bot.message_handler(commands=['gpt4'])
-def gpt4_command(message):
-    """Использование GPT-4 для сложных запросов"""
-    try:
-        query = message.text.replace('/gpt4', '').strip()
-        
-        if not query:
-            bot.reply_to(message, "🧠 Используй GPT-4 для сложных задач:\n/gpt4 объясни квантовую физику\n/gpt4 напиши бизнес-план\n/gpt4 придумай креативную идею")
-            return
-        
-        user_id = message.from_user.id
-        if user_id not in user_conversations:
-            user_conversations[user_id] = [{"role": "system", "content": SMART_SYSTEM_PROMPT}]
-        
-        user_conversations[user_id].append({"role": "user", "content": f"GPT-4 ЗАПРОС: {query}"})
-        
-        bot.reply_to(message, "🧠 *GPT-4 анализирует запрос...*", parse_mode='Markdown')
-        
-        response = get_smart_response(user_conversations[user_id], use_gpt4=True)
-        
-        user_conversations[user_id].append({"role": "assistant", "content": response})
-        
-        # Ограничиваем историю
-        if len(user_conversations[user_id]) > 8:
-            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-7:]
-        
-        if len(response) > 4000:
-            parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-            for i, part in enumerate(parts):
-                if i == 0:
-                    bot.reply_to(message, f"🧠 *GPT-4 отвечает:*\n\n{part}", parse_mode='Markdown')
-                else:
-                    bot.send_message(message.chat.id, part)
-        else:
-            bot.reply_to(message, f"🧠 *GPT-4 отвечает:*\n\n{response}", parse_mode='Markdown')
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка GPT-4: {e}")
-        bot.reply_to(message, "❌ GPT-4 временно недоступен. Используй обычный режим.")
-
-@bot.message_handler(commands=['image', 'img'])
+@bot.message_handler(commands=['image'])
 def image_command(message):
-    """Генерация изображения через DALL-E 3"""
     try:
-        prompt = message.text.replace('/image', '').replace('/img', '').strip()
+        prompt = message.text.replace('/image', '').strip()
         
         if not prompt:
-            bot.reply_to(message, "🎨 Опиши что создать:\n/image космический корабль в nebula\n/image кот в костюме супергероя\n/image футуристический город")
+            bot.reply_to(message, "🎨 Опиши что создать:\n/image космический корабль\n/image кот в шляпе")
             return
         
-        bot.reply_to(message, f"🎨 *DALL-E 3 создает:* '{prompt}'...", parse_mode='Markdown')
+        bot.reply_to(message, f"🎨 Создаю: '{prompt}'...")
         
         image_url = generate_image_dalle(prompt)
         
         if image_url:
-            # Скачиваем и отправляем изображение
             image_response = requests.get(image_url)
             image_data = BytesIO(image_response.content)
             
@@ -249,98 +166,60 @@ def image_command(message):
             
     except Exception as e:
         logger.error(f"❌ Ошибка создания изображения: {e}")
-        bot.reply_to(message, "❌ Ошибка генерации изображения")
+        bot.reply_to(message, "❌ Ошибка генерации")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
-    """Обработка фотографий"""
     try:
-        bot.reply_to(message, "📸 *Анализирую изображение...*", parse_mode='Markdown')
+        bot.reply_to(message, "📸 Анализирую изображение...")
         
         analysis = analyze_image(message.photo[-1])
         
         if analysis:
-            bot.reply_to(message, f"📸 *Анализ изображения:*\n\n{analysis}", parse_mode='Markdown')
+            bot.reply_to(message, f"📸 Анализ изображения:\n\n{analysis}")
         else:
-            bot.reply_to(message, "❌ Не удалось проанализировать изображение")
+            bot.reply_to(message, "❌ Не удалось проанализировать")
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки фото: {e}")
-        bot.reply_to(message, "❌ Ошибка анализа изображения")
+        bot.reply_to(message, "❌ Ошибка анализа")
 
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
-    """Обработка голосовых сообщений"""
     try:
-        bot.reply_to(message, "🎤 *Расшифровываю голосовое...*", parse_mode='Markdown')
+        bot.reply_to(message, "🎤 Расшифровываю голосовое...")
         
         transcript = transcribe_audio(message.voice)
         
         if transcript:
-            bot.reply_to(message, f"🎤 *Распознанный текст:*\n{transcript}", parse_mode='Markdown')
+            bot.reply_to(message, f"🎤 Распознанный текст:\n{transcript}")
             
-            # Автоматически обрабатываем распознанный текст
+            # Обрабатываем текст
             user_id = message.from_user.id
             if user_id not in user_conversations:
                 user_conversations[user_id] = [{"role": "system", "content": SMART_SYSTEM_PROMPT}]
             
-            user_conversations[user_id].append({"role": "user", "content": f"ГОЛОСОВОЕ: {transcript}"})
+            response = get_smart_response([
+                {"role": "system", "content": SMART_SYSTEM_PROMPT},
+                {"role": "user", "content": transcript}
+            ])
             
-            response = get_smart_response(user_conversations[user_id])
-            
-            user_conversations[user_id].append({"role": "assistant", "content": response})
-            
-            if len(user_conversations[user_id]) > 8:
-                user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-7:]
-            
-            bot.reply_to(message, f"🤖 *Ответ на голосовое:*\n\n{response}", parse_mode='Markdown')
+            bot.reply_to(message, f"🤖 Ответ:\n\n{response}")
         else:
-            bot.reply_to(message, "❌ Не удалось распознать голосовое сообщение")
+            bot.reply_to(message, "❌ Не удалось распознать голосовое")
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки голосового: {e}")
-        bot.reply_to(message, "❌ Ошибка распознавания голоса")
+        bot.reply_to(message, "❌ Ошибка распознавания")
 
 @bot.message_handler(commands=['clear'])
 def clear_context(message):
     user_id = message.from_user.id
     user_conversations[user_id] = [{"role": "system", "content": SMART_SYSTEM_PROMPT}]
-    bot.reply_to(message, "🧹 *История очищена!*", parse_mode='Markdown')
-
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    help_text = """
-🆘 *ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ*
-
-🧠 **УМНЫЕ ФУНКЦИИ:**
-• `/gpt4 [запрос]` - GPT-4 для сложных задач
-• Автоконтекст - помню 8 последних сообщений
-• Глубокий анализ и креативность
-
-🎨 **СОЗДАНИЕ КОНТЕНТА:**
-• `/image [описание]` - генерация изображений DALL-E 3
-• Креативное письмо и идеи
-• Дизайн и арт-проекты
-
-📱 **МУЛЬТИМЕДИА:**
-• Отправь фото - детальный анализ
-• Отправь голосовое - расшифровка и ответ
-• Поддержка разных форматов
-
-⚡ **КОМАНДЫ:**
-• `/start` - описание возможностей
-• `/gpt4` - умный режим
-• `/image` - создание картинок
-• `/clear` - очистка истории
-• `/help` - эта справка
-
-*Просто общайся со мной в любом формате!* 🚀
-    """
-    bot.reply_to(message, help_text, parse_mode='Markdown')
+    bot.reply_to(message, "🧹 История очищена!")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    """Обработка текстовых сообщений"""
     try:
         user_id = message.from_user.id
         user_message = message.text
@@ -350,34 +229,24 @@ def handle_message(message):
         
         user_conversations[user_id].append({"role": "user", "content": user_message})
         
-        # Определяем сложность запроса для выбора модели
-        complex_keywords = ['анализируй', 'объясни', 'создай', 'придумай', 'проект', 'бизнес', 'науч', 'технич']
-        use_gpt4 = any(keyword in user_message.lower() for keyword in complex_keywords)
+        if len(user_conversations[user_id]) > 6:
+            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-5:]
         
         bot.send_chat_action(message.chat.id, 'typing')
         
-        response = get_smart_response(user_conversations[user_id], use_gpt4=use_gpt4)
+        response = get_smart_response(user_conversations[user_id])
         
         user_conversations[user_id].append({"role": "assistant", "content": response})
         
-        # Ограничиваем историю
-        if len(user_conversations[user_id]) > 8:
-            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-7:]
+        if len(user_conversations[user_id]) > 6:
+            user_conversations[user_id] = [user_conversations[user_id][0]] + user_conversations[user_id][-5:]
         
-        if len(response) > 4000:
-            parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-            for i, part in enumerate(parts):
-                if i == 0:
-                    bot.reply_to(message, part)
-                else:
-                    bot.send_message(message.chat.id, part)
-        else:
-            bot.reply_to(message, response)
+        bot.reply_to(message, response)
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки: {e}")
-        bot.reply_to(message, "❌ Временная ошибка. Попробуй еще раз!")
+        bot.reply_to(message, "❌ Ошибка. Попробуй еще раз!")
 
 if __name__ == '__main__':
-    logger.info("🚀 ЗАПУСКАЮ УМНОГО МУЛЬТИМЕДИЙНОГО БОТА...")
+    logger.info("🚀 Запускаю умного бота...")
     bot.infinity_polling()
